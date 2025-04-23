@@ -1,0 +1,24 @@
+services:
+  node1:
+    build: .
+    ports:
+      - "8001:8080"
+    environment:
+      - PORT=8080
+      - PEERS=node2:8080,node3:8080
+  
+  node2:
+    build: .
+    ports:
+      - "8002:8080"
+    environment:
+      - PORT=8080
+      - PEERS=node1:8080,node3:8080
+
+  node3:
+    build: .
+    ports:
+      - "8003:8080"
+    environment:
+      - PORT=8080
+      - PEERS=node1:8080,node2:8080
