@@ -6,18 +6,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/itsyaboikris/go_document_store/models"
+	"github.com/itsyaboikris/go_document_store/query"
 )
 
-type Document struct {
-	ID        string                 `json:"_id"`
-	Data      map[string]interface{} `json:"data"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
-}
-
 type Collection struct {
-	ID        string               `json:"_id"`
-	Documents map[string]*Document `json:"documents"`
+	ID        string                      `json:"_id"`
+	Documents map[string]*models.Document `json:"documents"`
 }
 
 type Project struct {
@@ -28,15 +23,17 @@ type Project struct {
 type DocumentStore struct {
 	Projects map[string]*Project `json:"projects"`
 	mu       sync.RWMutex
+	querier  *query.Query
 }
 
 func NewStore() *DocumentStore {
 	return &DocumentStore{
 		Projects: make(map[string]*Project),
+		querier:  query.NewQuery(),
 	}
 }
 
-func (ds *DocumentStore) Create(projectID, collectionID string, document map[string]interface{}) (*Document, error) {
+func (ds *DocumentStore) Create(projectID, collectionID string, document map[string]interface{}) (*models.Document, error) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
@@ -53,13 +50,13 @@ func (ds *DocumentStore) Create(projectID, collectionID string, document map[str
 	if !exists {
 		collection = &Collection{
 			ID:        collectionID,
-			Documents: make(map[string]*Document),
+			Documents: make(map[string]*models.Document),
 		}
 		project.Collections[collectionID] = collection
 	}
 
 	now := time.Now().UTC()
-	doc := &Document{
+	doc := &models.Document{
 		ID:        uuid.New().String(),
 		Data:      document,
 		CreatedAt: now,
@@ -71,7 +68,7 @@ func (ds *DocumentStore) Create(projectID, collectionID string, document map[str
 	return doc, nil
 }
 
-func (ds *DocumentStore) Get(projectID, collectionID, documentID string) (*Document, error) {
+func (ds *DocumentStore) Get(projectID, collectionID, documentID string) (*models.Document, error) {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
 
@@ -93,7 +90,7 @@ func (ds *DocumentStore) Get(projectID, collectionID, documentID string) (*Docum
 	return doc, nil
 }
 
-func (ds *DocumentStore) GetAll(projectID, collectionID string) ([]*Document, error) {
+func (ds *DocumentStore) GetAll(projectID, collectionID string) ([]*models.Document, error) {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
 
@@ -107,7 +104,7 @@ func (ds *DocumentStore) GetAll(projectID, collectionID string) ([]*Document, er
 		return nil, errors.New("collection not found")
 	}
 
-	docs := make([]*Document, 0, len(collection.Documents))
+	docs := make([]*models.Document, 0, len(collection.Documents))
 	for _, doc := range collection.Documents {
 		docs = append(docs, doc)
 	}
@@ -115,7 +112,7 @@ func (ds *DocumentStore) GetAll(projectID, collectionID string) ([]*Document, er
 	return docs, nil
 }
 
-func (ds *DocumentStore) Update(projectID, collectionID, documentID string, data map[string]interface{}) (*Document, error) {
+func (ds *DocumentStore) Update(projectID, collectionID, documentID string, data map[string]interface{}) (*models.Document, error) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
@@ -163,7 +160,7 @@ func (ds *DocumentStore) Delete(projectID, collectionID, documentID string) erro
 }
 
 // replication
-func (ds *DocumentStore) InsertWithID(projectID, collectionID string, doc *Document) error {
+func (ds *DocumentStore) InsertWithID(projectID, collectionID string, doc *models.Document) error {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
@@ -182,7 +179,7 @@ func (ds *DocumentStore) InsertWithID(projectID, collectionID string, doc *Docum
 	if !exists {
 		collection = &Collection{
 			ID:        collectionID,
-			Documents: make(map[string]*Document),
+			Documents: make(map[string]*models.Document),
 		}
 		project.Collections[collectionID] = collection
 	}
@@ -239,9 +236,40 @@ func (ds *DocumentStore) CreateCollection(projectID, collectionID string) (*Coll
 
 	collection := &Collection{
 		ID:        collectionID,
-		Documents: make(map[string]*Document),
+		Documents: make(map[string]*models.Document),
 	}
 
 	project.Collections[collectionID] = collection
 	return collection, nil
+}
+
+func (ds *DocumentStore) Query(projectID, collectionID string, filter map[string]interface{}) ([]*models.Document, error) {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+
+	project, exists := ds.Projects[projectID]
+	if !exists {
+		return nil, errors.New("project not found")
+	}
+
+	collection, exists := project.Collections[collectionID]
+	if !exists {
+		return nil, errors.New("collection not found")
+	}
+
+	documents := make([]*models.Document, 0, len(collection.Documents))
+	for _, doc := range collection.Documents {
+		documents = append(documents, doc)
+	}
+
+	results, err := ds.querier.Execute(documents, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	if docs, ok := results.([]*models.Document); ok {
+		return docs, nil
+	}
+
+	return nil, errors.New("invalid query result type")
 }

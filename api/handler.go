@@ -7,6 +7,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/itsyaboikris/go_document_store/config"
+	"github.com/itsyaboikris/go_document_store/models"
 	"github.com/itsyaboikris/go_document_store/replication"
 	"github.com/itsyaboikris/go_document_store/store"
 )
@@ -28,6 +29,8 @@ func RegisterRoutes(r *mux.Router, store *store.DocumentStore) {
 	r.HandleFunc("/{project}/{collection}/document", h.GetAllDocuments).Methods("GET")
 	r.HandleFunc("/{project}/{collection}/document/{id}", h.UpdateDocument).Methods("PUT")
 	r.HandleFunc("/{project}/{collection}/document/{id}", h.DeleteDocument).Methods("DELETE")
+
+	r.HandleFunc("/{project}/{collection}/query", h.QueryDocuments).Methods("POST")
 }
 
 func (h *Handler) CreateDocument(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +159,7 @@ func (h *Handler) ReplicationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc := &store.Document{
+	doc := &models.Document{
 		ID:   docID,
 		Data: data,
 	}
@@ -212,4 +215,29 @@ func (h *Handler) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 	replication.Replicate(peers, projectID, collectionID, documentID, replicationDoc)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// query handler
+func (h *Handler) QueryDocuments(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectID := vars["project"]
+	collectionID := vars["collection"]
+
+	var filter map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	documents, err := h.store.Query(projectID, collectionID, filter)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"documents": documents,
+		"count":     len(documents),
+	})
 }
